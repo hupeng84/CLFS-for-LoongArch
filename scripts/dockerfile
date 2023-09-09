@@ -1,0 +1,28 @@
+FROM fedora:38
+
+LABEL author="hupeng" email="hupeng8484@qq.com"
+
+ENV TIME_ZONE Asia/Shanghai
+
+RUN ln -snf /usr/share/zoneinfo/$TIME_ZONE /etc/localtime
+
+RUN dnf update -y && \
+    dnf install -y \
+        sed \
+        tar \  
+        vim \
+        util-linux \
+        which \
+        ncurses && \
+    dnf autoremove -y && \
+    dnf clean all -y 
+
+ARG USER=lauser
+RUN useradd -m ${USER} && \
+    usermod -aG wheel ${USER} && \
+    echo "${USER}:${USER}" | chpasswd
+
+WORKDIR /home/${USER}
+USER ${USER}
+
+CMD ["/bin/bash"]

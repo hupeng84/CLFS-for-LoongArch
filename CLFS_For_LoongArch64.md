@@ -40,14 +40,14 @@
 
 ```sh
 export DISTRO_URL=https://mirrors.bfsu.edu.cn/fedora/releases/38/Everything/x86_64/os/
-sudo dnf install @core @c-development glibc-langpack-zh rpm-build git wget texinfo \
+sudo dnf -y install @core @c-development glibc-langpack-zh rpm-build git wget texinfo \
                  zlib-devel rsync libunistring-devel libffi-devel gc-devel \
                  expat-devel pcre2-devel glib2-devel cmake openssl-devel libyaml-devel \
                  libxml2-devel cairo-devel libxslt-devel gettext-devel \
-                 glib2-static libstdc++-static zlib-static \
+                 glib2-static libstdc++-static zlib-static glibc-static \
                  fpc tcl ncurses-devel gperf openssl icu docbook-style-xsl bc squashfs-tools \
                  graphviz doxygen xmlto xcursorgen dbus-glib lynx gtk-doc sqlite \
-                 asciidoc itstools \
+                 asciidoc itstool readline-devel \
                  --installroot ${HOME}/la-clfs --disablerepo="*" \
                  --repofrompath core,${DISTRO_URL} \
                  --releasever 38 --nogpgcheck
@@ -58,7 +58,8 @@ sudo dnf install @core @c-development glibc-langpack-zh rpm-build git wget texin
 　　复制当前系统的域名解析配置文件到新建立的系统中，以便该系统可以访问网络资源。
 
 ```sh
-cp -a /etc/resolv.conf ${HOME}/la-clfs/etc/
+sudo rm ${HOME}/la-clfs/etc/resolv.conf
+sudo cp -a /etc/resolv.conf ${HOME}/la-clfs/etc/
 ```
 
 　　接下来切换到该目录中:
@@ -146,6 +147,7 @@ umask 022
 export SYSDIR="/opt/mylaos"
 export BUILDDIR="${SYSDIR}/build"
 export DOWNLOADDIR="${SYSDIR}/downloads"
+export CROSSTOOLS_DIR="${SYSDIR}/cross-tools"
 export LC_ALL=POSIX
 export CROSS_HOST="$(echo $MACHTYPE | sed "s/$(echo $MACHTYPE | cut -d- -f2)/cross/")"
 export CROSS_TARGET="loongarch64-unknown-linux-gnu"
@@ -457,8 +459,8 @@ popd
 　　制作交叉工具链中所使用的MPFR软件包。  
 
 ```sh
-tar xvf ${DOWNLOADDIR}/mpfr-4.1.0.tar.xz -C ${BUILDDIR}
-pushd ${BUILDDIR}/mpfr-4.1.0
+tar xvf ${DOWNLOADDIR}/mpfr-4.2.0.tar.xz -C ${BUILDDIR}
+pushd ${BUILDDIR}/mpfr-4.2.0
 	./configure --prefix=${SYSDIR}/cross-tools --disable-static --with-gmp=${SYSDIR}/cross-tools
 	make ${JOBS}
 	make install
@@ -535,8 +537,8 @@ pushd ${BUILDDIR}/glibc-2.38
     sed -i "s@5.15.0@4.15.0@g" sysdeps/unix/sysv/linux/loongarch/configure{,.ac}
     mkdir -v build-64
     pushd build-64
-	    BUILD_CC="gcc" CC="${CROSS_TARGET}-gcc ${BUILD64} -mlarge-func-call" \
-        CXX="${CROSS_TARGET}-gcc ${BUILD64} -mlarge-func-call" \
+	    BUILD_CC="gcc" CC="${CROSS_TARGET}-gcc ${BUILD64}" \
+        CXX="${CROSS_TARGET}-gcc ${BUILD64}" \
         AR="${CROSS_TARGET}-ar" RANLIB="${CROSS_TARGET}-ranlib" \
         ../configure --prefix=/usr --host=${CROSS_TARGET} --build=${CROSS_HOST} \
 	                 --libdir=/usr/lib64 --libexecdir=/usr/lib64/glibc \
@@ -576,6 +578,7 @@ popd
 ```sh
 tar xvf ${DOWNLOADDIR}/gcc-13.2.0.tar.xz -C ${BUILDDIR} 
 pushd ${BUILDDIR}/gcc-13.2.0
+    patch -Np1 -i ${DOWNLOADDIR}/0001-Remove-crypt-and-crypt_r-interceptors.patch
 	mkdir tools-build-all
 	pushd tools-build-all
 		AR=ar LDFLAGS="-Wl,-rpath,${SYSDIR}/cross-tools/lib" \
@@ -761,7 +764,7 @@ popd
 
 ```sh
 tar xvf ${DOWNLOADDIR}/qemu-8.0.3.tar.xz -C ${BUILDDIR}
-pushd ${BUILDDIR}/qemu-8.0.3.tar.xz
+pushd ${BUILDDIR}/qemu-8.0.3
     mkdir build
     pushd build
         ../configure --prefix=${SYSDIR}/cross-tools --target-list=loongarch64-linux-user --static
@@ -951,8 +954,8 @@ popd
 ### 3.30 Ruby
 
 ```sh
-tar xvf ${DOWNLOADDIR}/ruby-3.1.3.tar.xz -C ${BUILDDIR}
-pushd ${BUILDDIR}/ruby-3.1.3
+tar xvf ${DOWNLOADDIR}/ruby-3.2.1.tar.xz -C ${BUILDDIR}
+pushd ${BUILDDIR}/ruby-3.2.1
     ./configure --prefix=${SYSDIR}/cross-tools
     make ${JOBS}
     make install
@@ -976,10 +979,9 @@ popd
 
 ### 3.32 CMake
 
-```
+```sh
 tar xvf ${DOWNLOADDIR}/cmake-3.27.1.tar.gz -C ${BUILDDIR}
 pushd ${BUILDDIR}/cmake-3.27.1
-    patch -Np1 -i ${DOWNLOADDIR}/cmake-3.22.3-add-loongarch64-to-checktypesize.patch
     mkdir build
     pushd build
         cmake -DCMAKE_INSTALL_PREFIX=${SYSDIR}/cross-tools -DCMAKE_BUILD_TYPE=RELEASE ..
@@ -1211,7 +1213,7 @@ popd
 
 #### Zlib
 ```sh
-tar xvf ${DOWNLOADDIR}/zlib-1.2.13.tar.xz -C ${BUILDDIR}
+tar xvf ${DOWNLOADDIR}/zlib-1.2.13.tar.gz -C ${BUILDDIR}
 pushd ${BUILDDIR}/zlib-1.2.13
 	CROSS_PREFIX=${CROSS_TARGET}- ./configure --prefix=/usr --libdir=/usr/lib64
 	make ${JOBS}
@@ -1241,8 +1243,9 @@ popd
 　　与上面编译的Binutils一样，这次编译的GCC也是在目标系统中使用的编译器，在交叉编译阶段不会使用到它，但是其提供的libgcc、libstdc++等库可以为后续软件包的编译提供链接用的库。
 
 ```sh
-tar xvf ${DOWNLOADDIR}/gcc-13.2.0.tar.gz -C ${BUILDDIR} 
+tar xvf ${DOWNLOADDIR}/gcc-13.2.0.tar.xz -C ${BUILDDIR} 
 pushd ${BUILDDIR}/gcc-13.2.0
+    patch -Np1 -i ${DOWNLOADDIR}/0001-Remove-crypt-and-crypt_r-interceptors.patch
 	sed -i 's@\./fixinc\.sh@-c true@' gcc/Makefile.in
 	mkdir cross-build
 	pushd cross-build
@@ -1439,6 +1442,19 @@ popd
 
 　　另外在编译过程中会编译在主系统中运行的程序，这个时候不能使用交叉编译器编译，所以还需要指定```BUILD_CC="gcc"```这个参数来保证编译这些要运行的程序使用的是本地编译器。
 
+#### libxcrypt
+```sh
+tar xvf ${DOWNLOADDIR}/libxcrypt-4.4.36.tar.gz -C ${BUILDDIR}
+pushd ${BUILDDIR}/libxcrypt-4.4.36
+	./autogen.sh
+	./configure --prefix=/usr --enable-hashes=strong,glibc \
+		--enable-obsolete-api=no --disable-static  --disable-failure-tokens \
+		--build=${CROSS_HOST} --host=${CROSS_TARGET}
+	make ${JOBS}
+	make DESTDIR=${SYSDIR}/sysroot install
+popd
+```
+
 #### Shadow
 ```sh
 tar xvf ${DOWNLOADDIR}/shadow-4.11.1.tar.xz -C ${BUILDDIR}
@@ -1453,7 +1469,8 @@ pushd ${BUILDDIR}/shadow-4.11.1
 	    -e '/PATH=/{s@/sbin:@@;s@/bin:@@}'                \
 	    -i etc/login.defs
 	./configure --sysconfdir=/etc --libdir=/usr/lib64 --build=${CROSS_HOST} --host=${CROSS_TARGET} \
-				--with-group-name-max-length=32
+				--with-group-name-max-length=32 \
+                --with-sysroot=${SYSDIR}/sysroot
 	make ${JOBS}
 	make DESTDIR=${SYSDIR}/sysroot exec_prefix=/usr install
 	mkdir -pv ${SYSDIR}/sysroot/etc/default
@@ -1550,15 +1567,15 @@ pushd ${BUILDDIR}/tcl8.6.13
 	           -e "s|$SRCDIR|${SYSDIR}/sysroot/usr/include|" \
 	           -e "/TCL_INCLUDE_SPEC/s|/usr/include|${SYSDIR}/sysroot/usr/include|" \
 	           tclConfig.sh
-	    sed -i -e "s|$SRCDIR/unix/pkgs/tdbc1.1.3|${SYSDIR}/sysroot/usr/lib64/tdbc1.1.3|" \
-               -e "s|$SRCDIR/pkgs/tdbc1.1.3/generic|${SYSDIR}/sysroot/usr/include|"    \
-               -e "s|$SRCDIR/pkgs/tdbc1.1.3/library|${SYSDIR}/sysroot/usr/lib64/tcl8.6|" \
-               -e "s|$SRCDIR/pkgs/tdbc1.1.3|${SYSDIR}/sysroot/usr/include|"            \
-               pkgs/tdbc1.1.3/tdbcConfig.sh
-	    sed -i -e "s|$SRCDIR/unix/pkgs/itcl4.2.2|${SYSDIR}/sysroot/usr/lib64/itcl4.2.2|" \
-               -e "s|$SRCDIR/pkgs/itcl4.2.2/generic|${SYSDIR}/sysroot/usr/include|"    \
-               -e "s|$SRCDIR/pkgs/itcl4.2.2|${SYSDIR}/sysroot/usr/include|"            \
-               pkgs/itcl4.2.2/itclConfig.sh
+	    sed -i -e "s|$SRCDIR/unix/pkgs/tdbc1.1.5|${SYSDIR}/sysroot/usr/lib64/tdbc1.1.5|" \
+               -e "s|$SRCDIR/pkgs/tdbc1.1.5/generic|${SYSDIR}/sysroot/usr/include|"    \
+               -e "s|$SRCDIR/pkgs/tdbc1.1.5/library|${SYSDIR}/sysroot/usr/lib64/tcl8.6|" \
+               -e "s|$SRCDIR/pkgs/tdbc1.1.5|${SYSDIR}/sysroot/usr/include|"            \
+               pkgs/tdbc1.1.5/tdbcConfig.sh
+	    sed -i -e "s|$SRCDIR/unix/pkgs/itcl4.2.3|${SYSDIR}/sysroot/usr/lib64/itcl4.2.3|" \
+               -e "s|$SRCDIR/pkgs/itcl4.2.3/generic|${SYSDIR}/sysroot/usr/include|"    \
+               -e "s|$SRCDIR/pkgs/itcl4.2.3|${SYSDIR}/sysroot/usr/include|"            \
+               pkgs/itcl4.2.3/itclConfig.sh
 	    unset SRCDIR
 	    make DESTDIR=${SYSDIR}/sysroot install
 	    make DESTDIR=${SYSDIR}/sysroot install-private-headers
@@ -1933,7 +1950,7 @@ popd
 
 #### Make
 ```sh
-tar xvf ${DOWNLOADDIR}/make-4.4.1tar.gz -C ${BUILDDIR}
+tar xvf ${DOWNLOADDIR}/make-4.4.1.tar.gz -C ${BUILDDIR}
 pushd ${BUILDDIR}/make-4.4.1
 	rm $(dirname $(find -name "config.sub"))/config.{sub,guess}
 	automake --add-missing
@@ -1970,7 +1987,6 @@ popd
 ```sh
 tar xvf ${DOWNLOADDIR}/cmake-3.27.1.tar.gz -C ${BUILDDIR}
 pushd ${BUILDDIR}/cmake-3.27.1
-    patch -Np1 -i ${DOWNLOADDIR}/cmake-3.22.3-add-loongarch64-to-checktypesize.patch
     mkdir build
     pushd build
         cmake -DCMAKE_CXX_COMPILER="${CROSS_TARGET}-g++" -DCMAKE_C_COMPILER="${CROSS_TARGET}-gcc" \
@@ -2100,7 +2116,7 @@ pushd ${BUILDDIR}/util-linux-2.39.1
         --disable-su --disable-setpriv --disable-runuser \
         --disable-pylibmount --disable-static --without-python \
         --without-systemd --disable-makeinstall-chown \
-        runstatedir=/run
+        runstatedir=/run --with-sysroot=${SYSDIR}/sysroot
 	make ${JOBS}
 	make DESTDIR=${SYSDIR}/sysroot install
 	rm -v ${SYSDIR}/sysroot/usr/lib64/lib{blkid,fdisk,mount,smartcols,uuid}.la
@@ -2173,7 +2189,7 @@ popd
 ```sh
 	mkdir -p build
 	pushd build
-		meson --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
+		CFLAGS='-O2' meson --prefix=/usr --libdir=/usr/lib64 --sysconfdir=/etc --localstatedir=/var \
 		      -Dbuildtype=release -Ddefault-dnssec=no -Dfirstboot=false \
 		      -Dinstall-tests=false -Dldconfig=false -Dsysusers=false \
 		      -Drpmmacrosdir=no -Dhomed=false -Duserdb=false -Dman=false -Dmode=release \
@@ -2314,7 +2330,7 @@ popd
 
 #### DHCPCD
 ```sh
-tar xvf ${DOWNLOADDIR}/dhcpcd-10.0.2.tar.xz -C ${BUILDDIR}
+tar xvf ${DOWNLOADDIR}/dhcpcd-10.0.2.tar.gz -C ${BUILDDIR}
 pushd ${BUILDDIR}/dhcpcd-10.0.2
 	./configure --prefix=/usr --sysconfdir=/etc --build=${CROSS_HOST} \
 	            --host=${CROSS_TARGET} --disable-privsep
@@ -2799,7 +2815,8 @@ popd
 * 准备代码
 
 ```sh
-git clone https://github.com/loongson/valgrind-loongarch64/ -b loongarch64-linux --depth 1
+#git clone https://github.com/loongson/valgrind-loongarch64/ -b loongarch64-linux --depth 1
+git clone https://github.com/FreeFlyingSheep/valgrind-loongarch64.git -b loongarch64-linux --depth 1
 pushd valgrind-loongarch64
     git archive --format=tar --output ../valgrind-git.tar "loongarch64-linux"
 popd
@@ -7520,6 +7537,7 @@ sed -i "s@${SYSDIR}/sysroot@@g" ${SYSDIR}/sysroot/etc/sgml/*
 https://github.com/docbook/xslt10-stylesheets/releases/download/release%2F1.79.2/docbook-xsl-nons-1.79.2.tar.bz2
 https://www.linuxfromscratch.org/patches/blfs/svn/docbook-xsl-nons-1.79.2-stack_fix-1.patch
 
+```sh
 tar xvf ${DOWNLOADDIR}/docbook-xsl-nons-1.79.2.tar.bz2 -C ${BUILDDIR}
 pushd ${BUILDDIR}/docbook-xsl-nons-1.79.2
     patch -Np1 -i ${DOWNLOADDIR}/docbook-xsl-nons-1.79.2-stack_fix-1.patch
@@ -8954,9 +8972,9 @@ pushd ${BUILDDIR}/linux-6.4.7
 	cp -av dest/lib/modules/* ${SYSDIR}/sysroot/lib/modules/
 	cp -av arch/loongarch/boot/vmlinux.efi ${SYSDIR}/sysroot/boot/vmlinux.efi
 	pushd tools/perf
-	    JOBS=78 make ARCH=loongarch CROSS_COMPILE=${CROSS_TARGET}-
+	    JOBS=78 make ARCH=loongarch CROSS_COMPILE=${CROSS_TARGET}- NO_LIBTRACEEVENT=1
 	    JOBS=78 make ARCH=loongarch CROSS_COMPILE=${CROSS_TARGET}- \
-	                 DESTDIR=${SYSDIR}/sysroot prefix=/usr install 
+	                 DESTDIR=${SYSDIR}/sysroot prefix=/usr NO_LIBTRACEEVENT=1 install 
 	popd
 popd
 
@@ -8989,8 +9007,8 @@ Device Drivers  --->
 
 #### Linux-Firmware
 ```sh
-tar xvf ${DOWNLOADDIR}/linux-firmware-20230515.tar.xz   -C ${BUILDDIR}
-pushd ${BUILDDIR}/linux-firmware-20230515
+tar xvf ${DOWNLOADDIR}/linux-firmware-20230625.tar.xz   -C ${BUILDDIR}
+pushd ${BUILDDIR}/linux-firmware-20230625
 	make DESTDIR=${SYSDIR}/sysroot install
 popd
 ```
@@ -9027,8 +9045,8 @@ popd
 https://www.linuxfromscratch.org/blfs/downloads/systemd/blfs-systemd-units-20230627.tar.xz
 
 ```sh
-tar -xvf ${DOWNLOADDIR}/blfs-systemd-units-20230627.tar.xz -C ${BUILDDIR}
-pushd ${BUILDDIR}/blfs-systemd-units-20230627
+tar -xvf ${DOWNLOADDIR}/blfs-systemd-units-20230816.tar.xz -C ${BUILDDIR}
+pushd ${BUILDDIR}/blfs-systemd-units-20230816
     make DESTDIR=${SYSDIR}/sysroot install-sshd
 popd
 ```
